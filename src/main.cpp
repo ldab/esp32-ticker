@@ -8,8 +8,14 @@
 #include "time.h"
 #include <WiFi.h>
 
+#include <ArduinoOTA.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+
+#include "https_request.h"
+
 const char *ntpServer             = "pool.ntp.org"; // local ntp server
-const uint32_t gmtOffset_sec      = 8 * 3600;       // GMT+08:00
+const uint32_t gmtOffset_sec      = 1 * 3600;       // GMT+08:00
 const uint16_t daylightOffset_sec = 0;
 
 #include <GxDEPG0213BN/GxDEPG0213BN.h>
@@ -19,21 +25,23 @@ const uint16_t daylightOffset_sec = 0;
 #include <GxIO/GxIO.h>
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
 
-#define SPI_MOSI    23
-#define SPI_MISO    -1
-#define SPI_CLK     18
+#define SPI_MOSI          23
+#define SPI_MISO          -1
+#define SPI_CLK           18
 
-#define ELINK_SS    5
-#define ELINK_BUSY  4
-#define ELINK_RESET 16
-#define ELINK_DC    17
+#define ELINK_SS          5
+#define ELINK_BUSY        4
+#define ELINK_RESET       16
+#define ELINK_DC          17
 
-#define SDCARD_SS   13
-#define SDCARD_CLK  14
-#define SDCARD_MOSI 15
-#define SDCARD_MISO 2
+#define SDCARD_SS         13
+#define SDCARD_CLK        14
+#define SDCARD_MOSI       15
+#define SDCARD_MISO       2
 
-#define BUTTON_PIN  39
+#define BUTTON_PIN        39
+
+#define TIME_TO_SLEEP_MIN 15
 
 typedef enum {
   RIGHT_ALIGNMENT = 0,
@@ -44,14 +52,11 @@ typedef enum {
 GxIO_Class io(SPI, /*CS=5*/ ELINK_SS, /*DC=*/ELINK_DC, /*RST=*/ELINK_RESET);
 GxEPD_Class display(io, /*RST=*/ELINK_RESET, /*BUSY=*/ELINK_BUSY);
 
-SPIClass sdSPI(VSPI);
-
 const uint8_t Whiteboard[1700] = {0x00};
 
 uint16_t Year = 0, Month = 0, Day = 0, Hour = 0, Minute = 0, Second = 0;
 char Date[] = {"2000/01/01"};
 char Time[] = {"00:00:00"};
-bool sdOK   = false;
 
 void displayText(const String &str, uint16_t y, uint8_t alignment)
 {
@@ -74,6 +79,7 @@ void displayText(const String &str, uint16_t y, uint8_t alignment)
   default:
     break;
   }
+
   display.println(str);
 }
 
@@ -81,37 +87,37 @@ void getTimeFromNTP()
 {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
+
   if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
+    log_e("Failed to obtain time");
     return;
   }
-
-  Date[2] = (timeinfo.tm_year - 100) / 10 % 10 + '0';
-  Date[3] = (timeinfo.tm_year - 100) % 10 + '0';
-  Date[5] = (timeinfo.tm_mon + 1) / 10 % 10 + '0';
-  Date[6] = (timeinfo.tm_mon + 1) % 10 + '0';
-  Date[8] = timeinfo.tm_mday / 10 % 10 + '0';
-  Date[9] = timeinfo.tm_mday % 10 + '0';
-
-  Time[0] = timeinfo.tm_hour / 10 % 10 + '0';
-  Time[1] = timeinfo.tm_hour % 10 + '0';
-  Time[3] = timeinfo.tm_min / 10 % 10 + '0';
-  Time[4] = timeinfo.tm_min % 10 + '0';
-  Time[6] = timeinfo.tm_sec / 10 % 10 + '0';
-  Time[7] = timeinfo.tm_sec % 10 + '0';
-
-  Serial.println(Date);
-  Serial.println(Time);
-  Serial.println(" ");
 }
 
 void setup()
 {
   Serial.begin(115200);
-  Serial.println();
-  Serial.println("setup");
 
-  Serial.printf("Connecting to %s ", WIFI_SSID);
+  esp_sleep_wakeup_cause_t wakeup_reason;
+
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch (wakeup_reason) {
+  case ESP_SLEEP_WAKEUP_EXT0:
+    log_i("Wakeup caused by external signal using RTC_IO");
+    break;
+  case ESP_SLEEP_WAKEUP_EXT1:
+    log_i("Wakeup caused by external signal using RTC_CNTL");
+    break;
+  case ESP_SLEEP_WAKEUP_TIMER:
+    log_i("Wakeup caused by timer");
+    break;
+  default:
+    log_i("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+    break;
+  }
+
+  log_i("Connecting to %s ", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -119,7 +125,41 @@ void setup()
     Serial.print(".");
   }
 
-  Serial.println(" CONNECTED");
+  log_i(" CONNECTED");
+
+  ArduinoOTA.setHostname(HOSTNAME);
+
+  ArduinoOTA
+      .onStart([]() {
+        String type;
+        if (ArduinoOTA.getCommand() == U_FLASH)
+          type = "sketch";
+        else // U_SPIFFS
+          type = "filesystem";
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS
+        // using SPIFFS.end()
+        log_i("Start updating %s", type.c_str());
+      })
+      .onEnd([]() { log_i("\nEnd"); })
+      .onProgress([](unsigned int progress, unsigned int total) {
+        log_i("Progress: %u%%\r", (progress / (total / 100)));
+      })
+      .onError([](ota_error_t error) {
+        log_e("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR)
+          log_e("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR)
+          log_e("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR)
+          log_e("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR)
+          log_e("Receive Failed");
+        else if (error == OTA_END_ERROR)
+          log_e("End Failed");
+      });
+
+  ArduinoOTA.begin();
 
   SPI.begin(SPI_CLK, SPI_MISO, SPI_MOSI, ELINK_SS);
   display.init(); // enable diagnostic output on Serial
@@ -129,14 +169,6 @@ void setup()
   display.setTextColor(GxEPD_BLACK);
   display.setFont(&FreeMonoBold18pt7b);
   display.setCursor(0, 0);
-
-  sdSPI.begin(SDCARD_CLK, SDCARD_MISO, SDCARD_MOSI, SDCARD_SS);
-
-  if (!SD.begin(SDCARD_SS, sdSPI)) {
-    sdOK = false;
-  } else {
-    sdOK = true;
-  }
 
   display.fillScreen(GxEPD_WHITE);
   display.update();
@@ -149,4 +181,12 @@ void loop()
   displayText(String(Time), 90, CENTER_ALIGNMENT);
   display.updateWindow(22, 30, 222, 90, true);
   display.drawBitmap(Whiteboard, 22, 31, 208, 60, GxEPD_BLACK);
+
+  ArduinoOTA.handle();
+
+  https_request_init();
+
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_39, LOW);
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_MIN * 60 * 1000 * 1000);
+  esp_deep_sleep_start();
 }
