@@ -12,6 +12,9 @@
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 
+#include "FS.h"
+#include <LittleFS.h>
+
 #include "https_request.h"
 
 const char *ntpServer             = "pool.ntp.org"; // local ntp server
@@ -55,8 +58,6 @@ GxEPD_Class display(io, /*RST=*/ELINK_RESET, /*BUSY=*/ELINK_BUSY);
 const uint8_t Whiteboard[1700] = {0x00};
 
 uint16_t Year = 0, Month = 0, Day = 0, Hour = 0, Minute = 0, Second = 0;
-char Date[] = {"2000/01/01"};
-char Time[] = {"00:00:00"};
 
 void displayText(const String &str, uint16_t y, uint8_t alignment)
 {
@@ -83,20 +84,27 @@ void displayText(const String &str, uint16_t y, uint8_t alignment)
   display.println(str);
 }
 
-void getTimeFromNTP()
+esp_err_t getTimeFromNTP()
 {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
 
   if (!getLocalTime(&timeinfo)) {
     log_e("Failed to obtain time");
-    return;
+    return ESP_FAIL;
   }
+
+  return ESP_OK;
 }
 
 void setup()
 {
   Serial.begin(115200);
+
+  if (!LittleFS.begin(true)) {
+    log_e("LittleFS Mount Failed");
+    assert(false);
+  }
 
   esp_sleep_wakeup_cause_t wakeup_reason;
 
@@ -176,9 +184,13 @@ void setup()
 
 void loop()
 {
-  getTimeFromNTP();
-  displayText(String(Date), 60, CENTER_ALIGNMENT);
-  displayText(String(Time), 90, CENTER_ALIGNMENT);
+  if (getTimeFromNTP() == ESP_FAIL) {
+    displayText("Could not get time", 60, CENTER_ALIGNMENT);
+    display.updateWindow(22, 30, 222, 90, true);
+    display.drawBitmap(Whiteboard, 22, 31, 208, 60, GxEPD_BLACK);
+  }
+
+  displayText("ok", 60, CENTER_ALIGNMENT);
   display.updateWindow(22, 30, 222, 90, true);
   display.drawBitmap(Whiteboard, 22, 31, 208, 60, GxEPD_BLACK);
 
