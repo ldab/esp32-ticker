@@ -18,8 +18,7 @@
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
 
 // FreeFonts from Adafruit_GFX
-#include <Fonts/FreeMonoBold12pt7b.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
+#include "Fonts/Org_01.h"
 #include <Fonts/FreeMonoBold9pt7b.h>
 
 #include "https_request.h"
@@ -141,23 +140,16 @@ static esp_err_t getTimeFromNTP()
   return ESP_OK;
 }
 
-void setup()
+static void handle_error(const char *err_msg)
 {
-  Serial.begin(115200);
+  log_e("%s", err_msg);
+  displayText(err_msg, 60, CENTER_ALIGNMENT);
+  display.update();
+  go_to_sleep();
+}
 
-  if (!SPIFFS.begin(true)) {
-    log_e("LittleFS Mount Failed");
-    assert(false);
-  }
-
-  log_i("Connecting to %s ", WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-  }
-
-  log_i(" CONNECTED");
+static void ota_init(void)
+{
 
   ArduinoOTA.setHostname(HOSTNAME);
 
@@ -192,24 +184,77 @@ void setup()
       });
 
   ArduinoOTA.begin();
+}
+
+static void process_symbols(char *line)
+{
+  log_d("%s", line);
+
+  static size_t y = 0;
+  char *symbol_buf;
+  char *data = strtok_r((char *)line, ";", &symbol_buf);
+
+  if (data != NULL) {
+    // i.e semicolon delimited 0AI4.LON;Carslberg;851.04
+    float quote;
+
+    if (https_request_get_symbol_quote(data, &quote) == ESP_FAIL) {
+      handle_error("Failed to get data!");
+    }
+
+    log_i("%s value %.1f", data, quote);
+
+    // Get friendly name
+    data = strtok_r(NULL, ";", &symbol_buf);
+    displayText(data, 50 + y * 20, LEFT_ALIGNMENT);
+
+    // Get bought price
+    char last_pc[sizeof("-1000.0%")];
+    data = strtok_r(NULL, ";", &symbol_buf);
+    sprintf(last_pc, "%.01f%%", (quote - atof(data)) / atof(data) * 100);
+    displayText(last_pc, 50 + y * 20, RIGHT_ALIGNMENT);
+    y++;
+  }
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  log_i("Connecting to %s ", WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   SPI.begin(SPI_CLK, SPI_MISO, SPI_MOSI, ELINK_SS);
   display.init(); // enable diagnostic output on Serial
 
   display.setRotation(1);
   display.setTextColor(GxEPD_BLACK);
-  display.setFont(&FreeMonoBold9pt7b);
+  display.setFont(&Org_01);
   display.setCursor(0, 0);
+  display.setTextSize(2);
+
+  if (!SPIFFS.begin(true)) {
+    handle_error("SPIFFS Mount Failed");
+  }
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    if (millis() > 10 * 1000) {
+      handle_error("Could not connect to WiFi");
+    }
+  }
+
+  log_i("Connected!");
+
+  ota_init();
 
   if (getTimeFromNTP() == ESP_FAIL) {
-    displayText("Could not get time", 60, CENTER_ALIGNMENT);
-    display.update();
+    handle_error("Could not get time");
   }
 
   File file = SPIFFS.open(SYMBOL_PATH);
   if (!file || file.isDirectory()) {
-    log_e("Failed to open file for reading");
-    return;
+    handle_error("Failed to open file for reading");
   }
 
   size_t file_size = file.size();
@@ -224,26 +269,11 @@ void setup()
 
   https_request_init();
 
-  display.setFont(&FreeMonoBold12pt7b);
+  // @todo potentially dynamically change font if multiple lines
+  display.setTextSize(3);
 
   while (line != NULL) {
-    log_d("%s", line);
-
-    static size_t i = 0;
-    char *symbol_buf;
-    char *data = strtok_r((char *)line, ";", &symbol_buf);
-
-    if (data != NULL) {
-      // i.e semicolon delimited 0AI4.LON;Carslberg;851.04
-      // for (size_t i = 0; i < 3; i++) {
-      float quote;
-      https_request_get_symbol_quote(data, &quote);
-      log_i("%s value %.1f", data, quote);
-      displayText(data, 50 + i * 20, LEFT_ALIGNMENT);
-      i++;
-      // }
-    }
-
+    process_symbols(line);
     line = strtok_r(NULL, "\r\n", &line_buf);
   }
 

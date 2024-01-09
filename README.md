@@ -15,6 +15,8 @@ https://www.aliexpress.com/item/32869729970.html
 </p>
 
 ## Todo
+- [ ] HTTP update from GitHub
+- [ ] Configuration webserver
 
 ## Note
 
