@@ -33,11 +33,11 @@ ESP32 eink [Alpha vantage + RapidAPI](https://rapidapi.com/alphavantage/api/alph
 
 ## Quick Guide
 
-1. Create an account at rapidapi.com
+1. Create an account at https://rapidapi.com
 2. Subscribe to https://rapidapi.com/alphavantage/api/alpha-vantage
-3. Copy your `RapidAPI` token to https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L23
-4. Add WiFi `SSID` and `Password` to https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L24
-5. Change the stock symbols and bought price on https://github.com/ldab/esp32-ticker/blob/main/data/symbols.txt
+3. Copy your `RapidAPI` token to [platformio.ini#L23](https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L23)
+4. Add WiFi `SSID` and `Password` to [platformio.ini#L24](https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L24)
+5. Change the stock symbols and bought price on [data/symbols.txt](https://github.com/ldab/esp32-ticker/blob/main/data/symbols.txt)
 6. PlatformIO -> Upload
 7. PlatformIO -> Upload Filesystem Image
 
