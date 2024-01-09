@@ -28,8 +28,13 @@ ESP32 eink [Alpha vantage + RapidAPI](https://rapidapi.com/alphavantage/api/alph
 
 ## Note
 
-- Sleep current is 600uA
 - API limit is [500 requests](https://rapidapi.com/alphavantage/api/alpha-vantage) per day
+- Sleep current is 600uA
+
+<p align="center">
+  <img src="docs/ppk.png" width="30%">
+</p>
+
 
 ## Quick Guide
 
