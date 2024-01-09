@@ -16,7 +16,6 @@ ESP32 eink [Alpha vantage + RapidAPI](https://rapidapi.com/alphavantage/api/alph
 
 - [ ] HTTP update from GitHub
 - [ ] Configuration webserver
-- [ ] Sleep more at night
 - [ ] Webflasher for no code users
 
 ## Hardware Needed
