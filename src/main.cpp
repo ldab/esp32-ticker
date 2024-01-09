@@ -1,32 +1,28 @@
 
 #include "Arduino.h"
 
-#include "SD.h"
-#include "SPI.h"
-#include <GxEPD.h>
-
-#include "time.h"
-#include <WiFi.h>
-
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
+#include <WiFi.h>
 #include <WiFiUdp.h>
 
 #include "FS.h"
-#include <LittleFS.h>
+#include "SPIFFS.h"
+#include "time.h"
 
-#include "https_request.h"
-
-const char *ntpServer             = "pool.ntp.org"; // local ntp server
-const uint32_t gmtOffset_sec      = 1 * 3600;       // GMT+08:00
-const uint16_t daylightOffset_sec = 0;
-
+// Eink display stuff
+#include "SPI.h"
 #include <GxDEPG0213BN/GxDEPG0213BN.h>
-
-#include <Fonts/FreeMonoBold18pt7b.h>
-
+#include <GxEPD.h>
 #include <GxIO/GxIO.h>
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
+
+// FreeFonts from Adafruit_GFX
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+
+#include "https_request.h"
 
 #define SPI_MOSI          23
 #define SPI_MISO          -1
@@ -42,9 +38,9 @@ const uint16_t daylightOffset_sec = 0;
 #define SDCARD_MOSI       15
 #define SDCARD_MISO       2
 
-#define BUTTON_PIN        39
-
 #define TIME_TO_SLEEP_MIN 15
+
+#define SYMBOL_PATH       "/symbols.txt"
 
 typedef enum {
   RIGHT_ALIGNMENT = 0,
@@ -52,14 +48,14 @@ typedef enum {
   CENTER_ALIGNMENT,
 } Text_alignment;
 
+const char *ntpServer             = "pool.ntp.org"; // local ntp server
+const uint32_t gmtOffset_sec      = 1 * 3600;       // GMT+01:00
+const uint16_t daylightOffset_sec = 0;
+
 GxIO_Class io(SPI, /*CS=5*/ ELINK_SS, /*DC=*/ELINK_DC, /*RST=*/ELINK_RESET);
 GxEPD_Class display(io, /*RST=*/ELINK_RESET, /*BUSY=*/ELINK_BUSY);
 
-const uint8_t Whiteboard[1700] = {0x00};
-
-uint16_t Year = 0, Month = 0, Day = 0, Hour = 0, Minute = 0, Second = 0;
-
-void displayText(const String &str, uint16_t y, uint8_t alignment)
+static void displayText(const String &str, uint16_t y, uint8_t alignment)
 {
   int16_t x = 0;
   int16_t x1, y1;
@@ -84,7 +80,50 @@ void displayText(const String &str, uint16_t y, uint8_t alignment)
   display.println(str);
 }
 
-esp_err_t getTimeFromNTP()
+static void draw_battery(uint32_t batt)
+{
+  const uint8_t start  = 225;
+  const uint8_t height = 10;
+  const uint8_t radius = 2;
+  const uint8_t width  = 21;
+
+  if (batt > 4000) {
+    display.fillRoundRect(start, height, width, height, radius, GxEPD_BLACK);
+  } else if (batt > 3500) {
+    uint8_t full_width = width / 3 * 2;
+    display.fillRoundRect(start, height, full_width, height, radius,
+                          GxEPD_BLACK);
+    display.drawRoundRect(start + full_width, height, width - full_width,
+                          height, radius, GxEPD_BLACK);
+  } else {
+    uint8_t full_width = width / 3;
+    display.fillRoundRect(start, height, full_width, height, radius,
+                          GxEPD_BLACK);
+    display.drawRoundRect(start + full_width, height, width - full_width,
+                          height, radius, GxEPD_BLACK);
+  }
+}
+
+static void update_battery()
+{
+  analogReadResolution(12);
+  uint32_t batt_mv = analogReadMilliVolts(GPIO_NUM_35) * 2;
+  log_i("Battery %lumV", batt_mv);
+  draw_battery(batt_mv);
+}
+
+static void go_to_sleep(void)
+{
+  log_i("Going to sleep for %d minutes", TIME_TO_SLEEP_MIN);
+
+  display.powerDown();
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_39, LOW);
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_MIN * 60 * 1000 * 1000);
+  delay(500); // don't know if needed but....
+  esp_deep_sleep_start();
+}
+
+static esp_err_t getTimeFromNTP()
 {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
@@ -94,6 +133,11 @@ esp_err_t getTimeFromNTP()
     return ESP_FAIL;
   }
 
+  char human_time[sizeof("08/04-08:04")] = {'\0'};
+  sprintf(human_time, "%02d/%02d-%02d:%02d", timeinfo.tm_mday,
+          timeinfo.tm_mon + 1, timeinfo.tm_hour, timeinfo.tm_min);
+  displayText(human_time, 20, LEFT_ALIGNMENT);
+
   return ESP_OK;
 }
 
@@ -101,28 +145,9 @@ void setup()
 {
   Serial.begin(115200);
 
-  if (!LittleFS.begin(true)) {
+  if (!SPIFFS.begin(true)) {
     log_e("LittleFS Mount Failed");
     assert(false);
-  }
-
-  esp_sleep_wakeup_cause_t wakeup_reason;
-
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-
-  switch (wakeup_reason) {
-  case ESP_SLEEP_WAKEUP_EXT0:
-    log_i("Wakeup caused by external signal using RTC_IO");
-    break;
-  case ESP_SLEEP_WAKEUP_EXT1:
-    log_i("Wakeup caused by external signal using RTC_CNTL");
-    break;
-  case ESP_SLEEP_WAKEUP_TIMER:
-    log_i("Wakeup caused by timer");
-    break;
-  default:
-    log_i("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
-    break;
   }
 
   log_i("Connecting to %s ", WIFI_SSID);
@@ -130,7 +155,6 @@ void setup()
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
   }
 
   log_i(" CONNECTED");
@@ -149,7 +173,7 @@ void setup()
         // using SPIFFS.end()
         log_i("Start updating %s", type.c_str());
       })
-      .onEnd([]() { log_i("\nEnd"); })
+      .onEnd([]() { log_i("End"); })
       .onProgress([](unsigned int progress, unsigned int total) {
         log_i("Progress: %u%%\r", (progress / (total / 100)));
       })
@@ -173,32 +197,80 @@ void setup()
   display.init(); // enable diagnostic output on Serial
 
   display.setRotation(1);
-  display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
-  display.setFont(&FreeMonoBold18pt7b);
+  display.setFont(&FreeMonoBold9pt7b);
   display.setCursor(0, 0);
 
-  display.fillScreen(GxEPD_WHITE);
+  if (getTimeFromNTP() == ESP_FAIL) {
+    displayText("Could not get time", 60, CENTER_ALIGNMENT);
+    display.update();
+  }
+
+  File file = SPIFFS.open(SYMBOL_PATH);
+  if (!file || file.isDirectory()) {
+    log_e("Failed to open file for reading");
+    return;
+  }
+
+  size_t file_size = file.size();
+  uint8_t *buf     = (uint8_t *)malloc(file_size);
+  while (file.available()) {
+    log_i("Read from file: %d bytes", file.read(buf, file_size));
+  }
+  file.close();
+
+  char *line_buf;
+  char *line = strtok_r((char *)buf, "\r\n", &line_buf);
+
+  https_request_init();
+
+  display.setFont(&FreeMonoBold12pt7b);
+
+  while (line != NULL) {
+    log_d("%s", line);
+
+    static size_t i = 0;
+    char *symbol_buf;
+    char *data = strtok_r((char *)line, ";", &symbol_buf);
+
+    if (data != NULL) {
+      // i.e semicolon delimited 0AI4.LON;Carslberg;851.04
+      // for (size_t i = 0; i < 3; i++) {
+      float quote;
+      https_request_get_symbol_quote(data, &quote);
+      log_i("%s value %.1f", data, quote);
+      displayText(data, 50 + i * 20, LEFT_ALIGNMENT);
+      i++;
+      // }
+    }
+
+    line = strtok_r(NULL, "\r\n", &line_buf);
+  }
+
+  update_battery();
   display.update();
+  free(buf);
+
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch (wakeup_reason) {
+  case ESP_SLEEP_WAKEUP_EXT0:
+    log_i("Wakeup caused by external signal using RTC_IO");
+    break;
+  case ESP_SLEEP_WAKEUP_TIMER:
+  default:
+    log_i("Wakeup reason: %d", wakeup_reason);
+    go_to_sleep();
+    break;
+  }
 }
 
 void loop()
 {
-  if (getTimeFromNTP() == ESP_FAIL) {
-    displayText("Could not get time", 60, CENTER_ALIGNMENT);
-    display.updateWindow(22, 30, 222, 90, true);
-    display.drawBitmap(Whiteboard, 22, 31, 208, 60, GxEPD_BLACK);
-  }
-
-  displayText("ok", 60, CENTER_ALIGNMENT);
-  display.updateWindow(22, 30, 222, 90, true);
-  display.drawBitmap(Whiteboard, 22, 31, 208, 60, GxEPD_BLACK);
-
   ArduinoOTA.handle();
 
-  https_request_init();
-
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_39, LOW);
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_MIN * 60 * 1000 * 1000);
-  esp_deep_sleep_start();
+  // keep on for X min for OTA and config
+  if (millis() > 10 * 60 * 1000) {
+    go_to_sleep();
+  }
 }

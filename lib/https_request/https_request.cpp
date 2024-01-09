@@ -53,24 +53,63 @@ static void setClock()
   log_i("Current time: %s", asctime(&timeinfo));
 }
 
+static float parse_response(const char *response)
+{
+  // {
+  //   "Global Quote": {
+  //       "01. symbol": "0QF.F",
+  //       "02. open": "99.3400",
+  //       "03. high": "105.0800",
+  //       "04. low": "99.0000",
+  //       "05. price": "105.0800",
+  //       "06. volume": "360",
+  //       "07. latest trading day": "2024-01-05",
+  //       "08. previous close": "99.1200",
+  //       "09. change": "5.9600",
+  //       "10. change percent": "6.0129%"
+  //   }
+  // }
+
+  float price = 0;
+
+  if (response != NULL) {
+    char *price_json = strstr(response, "\"05. price\": \"");
+
+    if (price_json != NULL) {
+      log_d("price_json %s", price_json);
+      price = atof(price_json + strlen("\"05. price\": \""));
+      log_d("Price %f", price);
+    }
+  }
+
+  return price;
+}
+
 void https_request_init()
 {
-  setClock();
+  setClock(); //
+}
 
+esp_err_t https_request_get_symbol_quote(char *symbol, float *quote)
+{
   WiFiClientSecure *client = new WiFiClientSecure;
   if (client) {
     client->setCACert(rootCACertificate);
     {
       HTTPClient https;
 
-      log_i("[HTTPS] begin...");
+      char request_url[] =
+          "https://alpha-vantage.p.rapidapi.com/"
+          "query?function=GLOBAL_QUOTE&symbol=SYMBOLGOESHERE&datatype=json";
 
-      if (https.begin(
-              *client,
+      memset(request_url, 0, sizeof(request_url));
+
+      sprintf(request_url,
               "https://alpha-vantage.p.rapidapi.com/"
-              "query?function=GLOBAL_QUOTE&symbol=0qf.f&datatype=json")) {
+              "query?function=GLOBAL_QUOTE&symbol=%s&datatype=json",
+              symbol);
 
-        log_i("[HTTPS] GET...");
+      if (https.begin(*client, request_url)) {
 
         https.addHeader("X-Rapidapi-Key", API_TOKEN);
 
@@ -81,29 +120,34 @@ void https_request_init()
         if (httpCode > 0) {
           // HTTP header has been send and Server response header has been
           // handled
-          log_i("[HTTPS] GET... code: %d\n", httpCode);
+          log_i("[HTTPS] GET... code: %d", httpCode);
 
           // file found at server
           if (httpCode == HTTP_CODE_OK ||
               httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
             String payload = https.getString();
-            log_i("%s", payload.c_str());
+            log_d("%s", payload.c_str());
+            *quote = parse_response(payload.c_str());
           }
         } else {
-          log_i("[HTTPS] GET... failed, error: %s\n",
+          log_i("[HTTPS] GET... failed, error: %s",
                 https.errorToString(httpCode).c_str());
+          return ESP_FAIL;
         }
 
         https.end();
       } else {
-        log_i("[HTTPS] Unable to connect\n");
+        log_e("[HTTPS] Unable to connect");
+        return ESP_FAIL;
       }
-
-      // End extra scoping block
     }
 
     delete client;
+
   } else {
     log_e("Unable to create client");
+    return ESP_FAIL;
   }
+
+  return ESP_OK;
 }

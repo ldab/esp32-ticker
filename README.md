@@ -11,7 +11,7 @@ https://www.aliexpress.com/item/32869729970.html
 [![GitHub last commit](https://img.shields.io/github/last-commit/ldab/esp32-ticker.svg?style=social)](https://github.com/ldab/esp32-ticker)
 
 <p align="center">
-  <img src=".github/dev_board_pinout.png" width="30%">
+  <img src="docs/dev_board_pinout.png" width="30%">
 </p>
 
 ## Todo
