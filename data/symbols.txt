@@ -1,0 +1,4 @@
+0QF.F;Moderna;93.8
+0AI4.LON;Carlsberg;851.04
+0REH.LON;Frontline;204.91
+TSM;TSMC;102.87
