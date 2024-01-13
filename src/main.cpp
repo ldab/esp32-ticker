@@ -111,13 +111,13 @@ static void update_battery()
   draw_battery(batt_mv);
 }
 
-static void go_to_sleep(void)
+static void go_to_sleep(uint32_t sleep_time_min = TIME_TO_SLEEP_MIN)
 {
-  log_i("Going to sleep for %d minutes", TIME_TO_SLEEP_MIN);
+  log_i("Going to sleep for %d minutes", sleep_time_min);
 
   display.powerDown();
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_39, LOW);
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_MIN * 60 * 1000 * 1000);
+  esp_sleep_enable_timer_wakeup(sleep_time_min * 60 * 1000 * 1000);
   delay(500); // don't know if needed but....
   esp_deep_sleep_start();
 }
@@ -130,6 +130,18 @@ static esp_err_t getTimeFromNTP()
   if (!getLocalTime(&timeinfo)) {
     log_e("Failed to obtain time");
     return ESP_FAIL;
+  }
+
+  /// @todo calculate time difference instead
+  if (timeinfo.tm_hour > 17) {
+    // If friday sleep weekend
+    if (timeinfo.tm_wday == 5) {
+      go_to_sleep((48 + 14) * 60);
+    }
+    // else until 8am
+    else {
+      go_to_sleep(14 * 60);
+    }
   }
 
   char human_time[sizeof("08/04-08:04")] = {'\0'};

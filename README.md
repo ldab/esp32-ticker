@@ -16,7 +16,6 @@ ESP32 eink [Alpha vantage + RapidAPI](https://rapidapi.com/alphavantage/api/alph
 
 - [ ] HTTP update from GitHub
 - [ ] Configuration webserver
-- [ ] Sleep more at night
 - [ ] Webflasher for no code users
 
 ## Hardware Needed
@@ -28,16 +27,21 @@ ESP32 eink [Alpha vantage + RapidAPI](https://rapidapi.com/alphavantage/api/alph
 
 ## Note
 
-- Sleep current is 600uA
 - API limit is [500 requests](https://rapidapi.com/alphavantage/api/alpha-vantage) per day
+- Sleep current is 600uA
+
+<p align="center">
+  <img src="docs/ppk.png" width="30%">
+</p>
+
 
 ## Quick Guide
 
-1. Create an account at rapidapi.com
+1. Create an account at https://rapidapi.com
 2. Subscribe to https://rapidapi.com/alphavantage/api/alpha-vantage
-3. Copy your `RapidAPI` token to https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L23
-4. Add WiFi `SSID` and `Password` to https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L24
-5. Change the stock symbols and bought price on https://github.com/ldab/esp32-ticker/blob/main/data/symbols.txt
+3. Copy your `RapidAPI` token to [platformio.ini#L23](https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L23)
+4. Add WiFi `SSID` and `Password` to [platformio.ini#L24](https://github.com/ldab/esp32-ticker/blob/main/platformio.ini#L24)
+5. Change the stock symbols and bought price on [data/symbols.txt](https://github.com/ldab/esp32-ticker/blob/main/data/symbols.txt)
 6. PlatformIO -> Upload
 7. PlatformIO -> Upload Filesystem Image
 
