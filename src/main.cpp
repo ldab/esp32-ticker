@@ -132,8 +132,16 @@ static esp_err_t getTimeFromNTP()
     return ESP_FAIL;
   }
 
+  /// @todo calculate time difference instead
   if (timeinfo.tm_hour > 17) {
-    go_to_sleep(12 * 60);
+    // If friday sleep weekend
+    if (timeinfo.tm_wday == 5) {
+      go_to_sleep((48 + 14) * 60);
+    }
+    // else until 8am
+    else {
+      go_to_sleep(14 * 60);
+    }
   }
 
   char human_time[sizeof("08/04-08:04")] = {'\0'};
